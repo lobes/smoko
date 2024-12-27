@@ -2,6 +2,14 @@
 
 A command line tool that locks your screen after a certain amount of time so you can go outside and touch grass.
 
+# Dev Roadmap
+
+## Phase 1: Execute the keyboard shortcut to lock screen on macOS
+
+- [ ] Learn zig and macOS api
+
+# EVERYTHING BELOW THIS LINE IS TOMORROW LOBES PROBLEM
+
 ```
 smoko 47
 ```
