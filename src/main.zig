@@ -1,24 +1,37 @@
 const std = @import("std");
+const macos = @import("macos.zig");
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    // Add command line argument parsing
+    // TODO: Add timer functionality
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
 
-    try bw.flush(); // don't forget to flush!
+    // Ensure we have exactly 2 arguments (program name + delay minutes)
+    if (args.len != 2) {
+        std.debug.print("Usage: {s} <minutes>\n", .{args[0]});
+        std.debug.print("Example: {s} 47 - Put displays to sleep after 47 minutes\n", .{args[0]});
+        std.process.exit(1);
+    }
+
+    // Parse the minutes argument
+    const minutes = std.fmt.parseInt(u32, args[1], 10) catch {
+        std.debug.print("Error: Minutes must be a positive number\n", .{});
+        std.process.exit(1);
+    };
+
+    std.debug.print("Will put displays to sleep in {d} minutes\n", .{minutes});
+
+    try macos.setDisplaysToSleep(minutes);
 }
 
 test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+    // TODO: Replace this test with more relevant ones
+    // For now, we just ensure everything compiles
+    _ = macos;
 }
