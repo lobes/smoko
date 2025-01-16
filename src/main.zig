@@ -4,27 +4,46 @@ const builtin = @import("builtin");
 
 //TODO find a way to lock screen in macOS
 
+// ## Sub-Commands
+
+// Smoko is a bucket of sub commands:
+// `smoko now`
+// `smoko in 7`
+// `smoko at 3`
+// `smoko s`
+// `smoko pass`
+// `smoko moveto in 11`
+// `smoko moveto at noon`
+// `smoko wipe`
+// `smoko help`
+
+fn now() void {
+    std.debug.print("smoko now!\n", .{});
+}
+
 fn printHelp() void {
     std.debug.print(
-        \\Usage: smoko [options] [minutes]
+        \\Usage: smoko <command> [args]
         \\
-        \\Options:
-        \\  -h, --help             Show this help message
-        \\  -l [n], --list=[n]     List [n] coming smokos, sorted by time until smoko (default: all)
-        \\  -n, --next             List next coming smoko (equivalent to -list=1)
-        \\  -s, --secure           Lock the screen instead of sleeping displays
-        \\  -c, --countdown        Leave a countdown in the terminal instead of scheduling
-        \\ 
-        \\Arguments:
-        \\  minutes            Time to wait for smoko (default: 0)
+        \\Commands:
+        \\  now                "Down tools. Smoko."
+        \\                         - whatever you say, boss
+        \\  in <minutes>       "Going for smoko in 5."
+        \\                         - when you're asked to do a shitty job and need a break before you start
+        \\  at <time>          "We're having smoko at 10."
+        \\                         - what you tell the lads so they stop asking
+        \\  when               "How long till smoko?"
+        \\                         - when you don't know if you're gonna make it
+        \\  next in <minutes>  "Next smoko in 5."
+        \\                         - gotta be flexable
+        \\  next at <time>     "Pushing smoko to 11."
+        \\                         - shit happens
+        \\  wipe               "No more smokos today." - when it's the end of the day and the rest is just one long smoko anyway
+        \\  s                  Show status of scheduled smokos
+        \\  pass               "I gotta skip this smoko" - when duty calls
+        \\  help               Show this help message
         \\
-        \\Examples:
-        \\  smoko              Sleep displays immediately
-        \\  smoko 47           Schedule a smoko to sleep displays after 47 minutes
-        \\  smoko -c 10        Display a countdown for 10 minutes, refreshing every minute
-        \\  smoko -n           List next coming smoko
-        \\  smoko -l           List all coming smokos
-        \\  smoko -l 5         List 5 coming smokos
+        \\Examples: coming soon
     , .{});
     std.process.exit(0);
 }
@@ -42,6 +61,8 @@ pub fn main() !void {
         std.debug.print("Error: This program only works on macOS\n", .{});
         std.process.exit(1);
     }
+
+    now();
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
