@@ -64,7 +64,7 @@ pub fn main() !void {
         }
     }
 
-    debug.print("Made it to the end of main.");
+    debug.print("Made it to the end of main.", .{});
 
     return 0;
 }
