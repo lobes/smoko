@@ -1,10 +1,10 @@
 # smoko
 
-Australian slang for downing tools and taking a break for an unknown period of time. Here's a CLI tool of the same name.
+Australian slang for putting the tools down and taking a break for an unknown period of time.
 
-You tell it when you want to go for a smoko. `smoko in 7` will make Smoko (in 7 minutes) put your displays in sleep mode (it's idiomatic to jiggle your mouse/touchpad to end a smoko).
+You tell it when you want to go on smoko. At that time, smoko will put your displays to sleep.
 
-So you can down tools for a moment. And go have a smoko.
+So you can down tools for a moment. And go on smoko.
 
 Go drink a glass of water.
 
@@ -12,9 +12,7 @@ Go put your feet on some grass.
 
 Go powernap.
 
-Whatever.
-
-Your screens will be right where you left them.
+Do whatever you want. You're on smoko.
 
 ## Installation
 

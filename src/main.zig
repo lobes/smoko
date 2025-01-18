@@ -4,37 +4,32 @@ const debug = std.debug;
 const macos = @import("macos.zig");
 const builtin = @import("builtin");
 
-const usage =
-    \\Usage: smoko <command> [args]
+const HELP_TEXT =
+    \\Usage: smoko <action> [args]
     \\
-    \\Commands:
-    \\  now                "Down tools. Smoko."
-    \\                         - whatever you say, boss
-    \\  in <minutes>       "Going for smoko in 5."
-    \\                         - when you're asked to do a shitty job and need a break before you start
-    \\  at <time>          "We're having smoko at 10."
-    \\                         - what you tell the lads so they stop asking
-    \\  when               "How long till smoko?"
-    \\                         - when you don't know if you're gonna make it
-    \\  next in <minutes>  "Next smoko in 5."
-    \\                         - gotta be flexable
-    \\  next at <time>     "Pushing smoko to 11."
-    \\                         - shit happens
-    \\  clear              "No more smokos."
-    \\                         - when it's the end of the day and you've just gotta get it done
-    \\  s                  Show status of scheduled smokos
-    \\  pass               "I gotta skip this smoko" - when duty calls
-    \\  help               Show this help message
+    \\Action:
+    \\  now                -- Immediately set all displays to sleep
+    \\                      "Down tools. Smoko."
+    \\  add 5m             -- Set all displays to sleep in 5 minutes
+    \\                      "Going on smoko in 5."
+    \\  add 10am           -- Set all displays to sleep at 10:00AM
+    \\                      "It's smoko at 10."
+    \\  next               -- Print countdown to smoko
+    \\                      "How long till smoko?"
+    \\  list               -- Print all smoko countdowns
+    \\                      "How many smokos do we get?"
+    \\  edit 1m            -- Reset countdown to smoko
+    \\                      "One minute till smoko."
+    \\  skip               -- Delete next scheduled smoko
+    \\                      "Nah, I'm good."
+    \\  clear              -- Delete all scheduled smokos
+    \\                      "No more smokos."
+    \\  help               -- Show this help message
+    \\
 ;
 
 pub fn main() !void {
-    // Check if we can access binary `pmset` orelse
-
-    // Check if we're running on macOS
-    if (builtin.os.tag != .macos) {
-        debug.err("Error: This program only works on macOS\n", .{});
-        std.process.exit(1);
-    }
+    // Get everything ready
 
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_state.deinit();
@@ -43,30 +38,77 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(arena);
     const stdout = std.io.getStdOut().writer();
 
-    // Sub-Commands
     {
-        if (args.len == 0) {
-            try stdout.writeAll(usage);
-            debug.print("args.len was {s}", .{args.len});
+        if (args.len == 1) {
+            try stdout.writeAll(HELP_TEXT);
             return std.process.cleanExit();
         }
 
         var i: usize = 1;
         while (i < args.len) : (i += 1) {
             const arg = args[i];
+            debug.print("{s}\n", .{arg});
             if (mem.eql(u8, "-h", arg) or mem.eql(u8, "help", arg)) {
-                try stdout.writeAll(usage);
-                debug.print("arg was {s}", .{args});
+                try stdout.writeAll(HELP_TEXT);
                 return std.process.cleanExit();
+            } else if (mem.eql(u8, "add", arg)) {
+                try setupLaunchd();
             } else {
                 fatal("unrecognised arg: {s}", .{arg});
             }
         }
     }
+}
 
-    debug.print("Made it to the end of main.", .{});
+pub fn setupLaunchd() !void {
+    var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const env_vars = std.process.EnvMap.init(arena);
 
-    return 0;
+    const plist_path = try std.fs.path.join(
+        std.heap.page_allocator,
+        &[_][]const u8{ env_vars.get("HOME") orelse return error.NoHome, "Library", "LaunchAgents", "com.example.pmsetscheduler.plist" },
+    );
+    defer std.heap.page_allocator.free(plist_path);
+
+    // Create the plist file
+    const file = try std.fs.createFileAbsolute(plist_path, .{});
+    defer file.close();
+
+    // Write the plist content
+    try file.writeAll(
+        \\<?xml version="1.0" encoding="UTF-8"?>
+        \\<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        \\<plist version="1.0">
+        \\<dict>
+        \\    <key>Label</key>
+        \\    <string>com.example.pmsetscheduler</string>
+        \\    <key>ProgramArguments</key>
+        \\    <array>
+        \\        <string>/usr/sbin/pmset</string>
+        \\        <string>displaysleepnow</string>
+        \\    </array>
+        \\    <key>StartCalendarInterval</key>
+        \\    <dict>
+        \\        <key>Hour</key>
+        \\        <integer>0</integer>
+        \\        <key>Minute</key>
+        \\        <integer>0</integer>
+        \\    </dict>
+        \\    <key>RunAtLoad</key>
+        \\    <false/>
+        \\    <key>StandardErrorPath</key>
+        \\    <string>/tmp/pmset.err</string>
+        \\    <key>StandardOutPath</key>
+        \\    <string>/tmp/pmset.out</string>
+        \\</dict>
+        \\</plist>
+    );
+
+    // Load the launchd job
+    var child = std.process.Child.init(&[_][]const u8{ "launchctl", "load", plist_path }, std.heap.page_allocator);
+    _ = try child.spawnAndWait();
 }
 
 fn fatal(comptime format: []const u8, args: anytype) noreturn {
@@ -74,17 +116,35 @@ fn fatal(comptime format: []const u8, args: anytype) noreturn {
     std.process.exit(1);
 }
 
-// ## Sub-Commands
+fn setDisplaysToSleep(minutes: u32) !void {
+    // Convert minutes to nanoseconds and sleep
+    // Use u64 to avoid integer overflow
+    const ns_per_minute: u64 = @as(u64, std.time.ns_per_s) * 60;
+    const total_ns: u64 = ns_per_minute * minutes;
+    std.time.sleep(total_ns);
 
-// Smoko is a bucket of sub commands:
-// `smoko now`
-// `smoko in 7`
-// `smoko at 3`
-// `smoko s`
-// `smoko pass`
-// `smoko moveto in 11`
-// `smoko moveto at noon`
-// `smoko wipe`
-// `smoko help`
+    std.debug.print("Time's up! Putting display to sleep...\n", .{});
 
-fn printHelp() void {}
+    const result = try std.process.Child.run(.{
+        .allocator = std.heap.page_allocator,
+        .argv = &[_][]const u8{ "pmset", "displaysleepnow" },
+    });
+
+    if (result.term.Exited != 0) {
+        std.debug.print("Failed to put display to sleep\n", .{});
+        return error.SetDisplaysToSleepFailed;
+    }
+}
+
+// Smoko is a bucket of actions:
+// smoko now
+// smoko add 3m
+// smoko add 1030
+// smoko add 2pm
+// smoko list
+// smoko skip
+// smoko edit 3m
+// smoko edit 1030
+// smoko edit 2pm
+// smoko clear
+// smoko help
