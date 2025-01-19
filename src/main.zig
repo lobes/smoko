@@ -1,7 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
 const debug = std.debug;
-const macos = @import("macos.zig");
 const builtin = @import("builtin");
 
 const HELP_TEXT =
@@ -31,38 +30,21 @@ const HELP_TEXT =
 const c = @cImport(@cInclude("stdio.h"));
 pub fn main() !void {
     // Testing direct .h bindings. Feels smooth
-    _ = c.printf("c stdio\n");
+    // _ = c.printf("c stdio\n");
 
     // Gettings args
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_state.deinit();
     const args = try std.process.argsAlloc(arena_state.allocator());
-
-    // caching and clearing stdout
-    // testing if i can clear the screen and then bring it back
-    const stdout = std.io.getStdOut();
-    const stdout_cache: []u8 = undefined;
-    _ = try stdout.reader().readAll(stdout_cache);
-
-    const clear = "I've just cleared the screen\n";
-    try stdout.writer().writeAll(clear);
-    {
-        if (args.len == 1) {
-            try sleepDisplays(1);
-        }
-
-        var i: usize = 1;
-        while (i < args.len) : (i += 1) {
-            const arg = args[i];
-            debug.print("{s}\n", .{arg});
-            if (mem.eql(u8, "-h", arg) or mem.eql(u8, "help", arg)) {
-                try stdout.writer().writeAll(HELP_TEXT);
-                return std.process.cleanExit();
-            } else if (mem.eql(u8, "add", arg)) {
-                try sleepDisplays(1);
-            } else {
-                fatal("unrecognised arg: {s}", .{arg});
-            }
+    if (args.len == 1) try sleepDisplays(1);
+    var i: u32 = 1;
+    while (args.len > i) : (i += 1) {
+        if (mem.eql(u8, args[i], "-h") or mem.eql(u8, args[i], "-h")) {
+            try std.io.getStdOut().writer().writeAll(HELP_TEXT);
+            return std.process.cleanExit();
+        } else {
+            const number = std.fmt.parseInt(u32, args[i], 0) catch continue;
+            try sleepDisplays(number);
         }
     }
 }
@@ -72,7 +54,7 @@ fn fatal(comptime format: []const u8, args: anytype) noreturn {
     std.process.exit(1);
 }
 
-fn sleepDisplays(minutes: u32) !void {
+fn sleepDisplays(minutes: u32) anyerror!void {
     // Convert minutes to nanoseconds and sleep
     // Use u64 to avoid integer overflow
     const ns_per_minute: u64 = @as(u64, std.time.ns_per_min);
