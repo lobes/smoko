@@ -12,7 +12,7 @@ const HELP_TEXT =
     \\     -- Immediately set all displays to sleep
     \\                  "Down tools. Smoko."
     \\
-    \\  smoko [1h5m|1015pm|2100]
+    \\  smoko 5
     \\
     \\     -- Display countdown in mins. Set all displays to sleep
     \\        after countdown
@@ -33,7 +33,7 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(arena_state.allocator());
 
     // No extra args, sleep immediately
-    if (args.len == 1) try sleepDisplays(1);
+    if (args.len == 1) try sleepDisplays(0);
 
     var i: u32 = 1;
     while (args.len > i) : (i += 1) {
@@ -49,23 +49,19 @@ pub fn main() !void {
     }
 }
 
-fn fatal(comptime format: []const u8, args: anytype) noreturn {
-    std.debug.print(format, args);
-    std.process.exit(1);
-}
-
 fn sleepDisplays(minutes: u32) anyerror!void {
     // Convert minutes to nanoseconds and sleep
     var mins_remaining: u32 = minutes;
+    const stdout = std.io.getStdOut().writer();
 
     while (mins_remaining > 0) {
-        std.debug.print("Smoko in {d} minutes.\n", .{mins_remaining});
+        try stdout.print("\rSmoko in {d} minutes.", .{mins_remaining});
         std.time.sleep(std.time.ns_per_min);
         mins_remaining -= 1;
     }
 
-    std.debug.print("Time for smoko.\n", .{});
-    std.time.sleep(std.time.ns_per_s * 7);
+    try stdout.print("\rTime for smoko.                 \n", .{});
+    std.time.sleep(std.time.ns_per_s * 3);
 
     const result = try std.process.Child.run(.{
         .allocator = std.heap.page_allocator,
@@ -73,7 +69,7 @@ fn sleepDisplays(minutes: u32) anyerror!void {
     });
 
     if (result.term.Exited != 0) {
-        std.debug.print("Failed to put display to sleep\n", .{});
+        try stdout.print("\nFailed to put display to sleep\n", .{});
         return error.SetDisplaysToSleepFailed;
     }
 }
