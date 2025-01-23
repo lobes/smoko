@@ -11,7 +11,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    exe.linkSystemLibrary("z");
     exe.linkLibC();
 
     // Add ApplicationServices framework for macOS
