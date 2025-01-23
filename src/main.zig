@@ -68,31 +68,39 @@ fn sleepDisplays(minutes: u32) anyerror!void {
     }
 
     try stdout.print("\rTime for smoko.                 \n", .{});
-    const pid = c.getpid();
-    try activateProcess(pid);
 
-    // Create an event tap to capture all input
+    // Create an event tap to capture all input first
     const tap = try createInputBlocker();
     defer c.CFRelease(tap);
 
-    // Run the event loop to process events
-    _ = c.CFRunLoopGetCurrent();
-    _ = c.CFRunLoopRun();
-
-    // Wait with captured input for a few sec before display sleep
-    std.time.sleep(std.time.ns_per_s * 3);
+    // Block input for 10 seconds
+    try stdout.print("Input blocked. Sleeping display in 10 seconds...\n", .{});
+    var time_remaining: f64 = 10.0;
+    while (time_remaining > 0) {
+        const run_result = c.CFRunLoopRunInMode(c.kCFRunLoopDefaultMode, 0.1, 0);
+        _ = run_result;
+        time_remaining -= 0.1;
+    }
 
     // Put displays to sleep
     const result = try displaySleepNow();
-    switch (result.term.Exited) {
-        0 => {},
-        else => {
-            try stdout.print("\nFailed to put display to sleep\n", .{});
-            return error.SetDisplaysToSleepFailed;
-        },
+    if (result.term.Exited != 0) {
+        try stdout.print("\nFailed to put display to sleep\n", .{});
+        return error.SetDisplaysToSleepFailed;
     }
 
-    std.time.sleep(std.time.ns_per_s * 10);
+    // Block input for another 10 seconds
+    try stdout.print("Display sleeping. Releasing input block in 10 seconds...\n", .{});
+    time_remaining = 10.0;
+    while (time_remaining > 0) {
+        const run_result = c.CFRunLoopRunInMode(c.kCFRunLoopDefaultMode, 0.1, 0);
+        _ = run_result;
+        time_remaining -= 0.1;
+    }
+
+    // Disable input blocking
+    c.CGEventTapEnable(tap, false);
+    try stdout.print("Input block released. Done.\n", .{});
 }
 
 /// Brings the specified process to the foreground
