@@ -1,83 +1,118 @@
 const std = @import("std");
+const fs = std.fs;
+const mem = std.mem;
+const process = std.process;
+const fmt = std.fmt;
+const heap = std.heap;
+const meta = std.meta;
+
+const DEFAULT_CONFIG_PATH = "~/.config/smoko/config.txt";
 
 pub const Config = struct {
-    // Default values for countdown timers
-    config_dir: []const u8 = ".config/smoko",
-    pre_blank_countdown_secs: u32 = 3,
-    post_blank_countdown_secs: u32 = 3,
+    pub const Options = enum {
+        buffer_before, // seconds of input lock before display is locked
+        smoko_length, // minutes of smoko
+        lock_length, // minutes of lock
+
+        pub fn fromString(str: []const u8) ?Options {
+            inline for (comptime std.meta.tags(Options)) |tag| {
+                if (mem.eql(u8, str, @tagName(tag))) {
+                    return tag;
+                }
+            }
+            return null;
+        }
+    };
+
+    buffer_before: u32 = 3, // seconds of input lock before display is locked
+    smoko_length: u32 = 3, // minutes of smoko
+    lock_length: u32 = 1, // minutes of lock
 
     pub fn loadOrCreate() !Config {
-        const config_path = try getConfigPath();
+        var cfg = Config{};
 
         // Try to load existing config
-        if (std.fs.path.dirname(config_path)) |dir| {
-            try std.fs.cwd().makePath(dir);
+        const config_path = try getConfigPath();
+        defer heap.page_allocator.free(config_path);
+
+        // Create config directory if it doesn't exist
+        if (fs.path.dirname(config_path)) |dir| {
+            try fs.cwd().makePath(dir);
         }
 
-        const file = std.fs.openFileAbsolute(config_path, .{ .mode = .read_only }) catch |err| switch (err) {
+        // Try to open existing config file
+        const file = fs.openFileAbsolute(config_path, .{ .mode = .read_only }) catch |err| switch (err) {
             error.FileNotFound => {
-                // Create default config
-                var config = Config{};
-                try config.save();
-                return config;
+                // Save default config to disk
+                try saveDefaults(config_path);
+                return Config{};
             },
             else => return err,
         };
         defer file.close();
 
+        // Read and parse existing config
         var buf: [1024]u8 = undefined;
         const bytes_read = try file.readAll(&buf);
 
-        var config = Config{};
-        var lines = std.mem.split(u8, buf[0..bytes_read], "\n");
+        var lines = mem.split(u8, buf[0..bytes_read], "\n");
         while (lines.next()) |line| {
-            var kv = std.mem.split(u8, line, "=");
-            const key = std.mem.trim(u8, kv.first(), " ");
-            const value = if (kv.next()) |v| std.mem.trim(u8, v, " ") else continue;
+            var kv = mem.split(u8, line, "=");
+            const key = mem.trim(u8, kv.first(), " ");
+            const value = if (kv.next()) |v| mem.trim(u8, v, " ") else continue;
 
-            inline for (std.meta.fields(Config)) |field| {
-                if (std.mem.eql(u8, key, field.name)) {
-                    switch (field.type) {
-                        []const u8 => @field(config, field.name) = value,
-                        u32 => @field(config, field.name) = try std.fmt.parseInt(u32, value, 10),
-                        else => {},
-                    }
+            if (Options.fromString(key)) |option| {
+                switch (option) {
+                    .buffer_before => cfg.buffer_before = try fmt.parseInt(u32, value, 10),
+                    .smoko_length => cfg.smoko_length = try fmt.parseInt(u32, value, 10),
+                    .lock_length => cfg.lock_length = try fmt.parseInt(u32, value, 10),
                 }
             }
         }
 
-        return config;
+        return cfg;
     }
 
-    pub fn save(self: Config) !void {
-        const config_path = try getConfigPath();
-
-        if (std.fs.path.dirname(config_path)) |dir| {
-            try std.fs.cwd().makePath(dir);
-        }
-
-        const file = try std.fs.createFileAbsolute(config_path, .{});
+    fn saveDefaults(config_path: []const u8) !void {
+        const file = try fs.createFileAbsolute(config_path, .{});
         defer file.close();
 
         var writer = file.writer();
 
-        // Iterate over all fields in Config
-        inline for (std.meta.fields(Config)) |field| {
-            const value = @field(self, field.name);
-            switch (field.type) {
-                []const u8 => try writer.print("{s}={s}\n", .{ field.name, value }),
-                u32 => try writer.print("{s}={d}\n", .{ field.name, value }),
-                else => {},
-            }
+        // Write default values
+        try writer.print("{s}={d}\n", .{ @tagName(Options.buffer_before), 3 });
+        try writer.print("{s}={d}\n", .{ @tagName(Options.smoko_length), 3 });
+        try writer.print("{s}={d}\n", .{ @tagName(Options.lock_length), 1 });
+    }
+
+    pub fn save(self: Config) !void {
+        const config_path = try getConfigPath();
+        defer heap.page_allocator.free(config_path);
+
+        if (fs.path.dirname(config_path)) |dir| {
+            try fs.cwd().makePath(dir);
+        }
+
+        const file = try fs.createFileAbsolute(config_path, .{});
+        defer file.close();
+
+        var writer = file.writer();
+
+        // Write all options
+        inline for (comptime std.meta.tags(Options)) |option| {
+            const value = switch (option) {
+                .buffer_before => self.buffer_before,
+                .smoko_length => self.smoko_length,
+                .lock_length => self.lock_length,
+            };
+            try writer.print("{s}={d}\n", .{ @tagName(option), value });
         }
     }
 };
 
-fn getConfigPath() ![]const u8 {
-    const home = try std.process.getEnvVarOwned(std.heap.page_allocator, "HOME");
-    defer std.heap.page_allocator.free(home);
+pub fn getConfigPath() ![]const u8 {
+    const home = try process.getEnvVarOwned(heap.page_allocator, "HOME");
+    defer heap.page_allocator.free(home);
 
-    const stdout = std.io.getStdOut().writer();
-    try stdout.print("Config directory: {s}/.config\n", .{home});
-    return try std.fs.path.join(std.heap.page_allocator, &[_][]const u8{ home, ".config", "smoko", "config.txt" });
+    return try fs.path.join(heap.page_allocator, &[_][]const u8{ home, ".config", "smoko", "config.txt" });
 }

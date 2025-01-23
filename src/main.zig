@@ -7,187 +7,25 @@ const mem = std.mem;
 const fmt = std.fmt;
 const time = std.time;
 const builtin = @import("builtin");
-const Config = @import("config.zig").Config;
-const DisplayManager = @import("display.zig").DisplayManager;
-const InputBlocker = @import("input.zig").InputBlocker;
+const config = @import("config.zig");
+const Config = config.Config;
 
-// OS-specific imports done at comptime
-const os_impl = switch (builtin.os.tag) {
-    .macos => struct {
-        const c = @cImport({
+const OS = struct {
+    const c = if (builtin.os.tag == .macos)
+        @cImport({
             @cInclude("ApplicationServices/ApplicationServices.h");
             @cInclude("CoreGraphics/CoreGraphics.h");
-        });
-
-        pub const EventTap = ?c.CFMachPortRef;
-        pub const Display = u32;
-
-        // Helper functions for CoreFoundation
-        pub fn releaseCF(ref: anytype) void {
-            if (ref) |r| {
-                c.CFRelease(@ptrCast(r));
-            }
-        }
-
-        pub fn createInputBlocker() !EventTap {
-            const event_mask = c.CGEventMaskBit(c.kCGEventKeyDown) |
-                c.CGEventMaskBit(c.kCGEventKeyUp) |
-                c.CGEventMaskBit(c.kCGEventMouseMoved) |
-                c.CGEventMaskBit(c.kCGEventLeftMouseDown) |
-                c.CGEventMaskBit(c.kCGEventLeftMouseUp) |
-                c.CGEventMaskBit(c.kCGEventRightMouseDown) |
-                c.CGEventMaskBit(c.kCGEventRightMouseUp) |
-                c.CGEventMaskBit(c.kCGEventScrollWheel) |
-                c.CGEventMaskBit(c.kCGEventFlagsChanged);
-
-            const tap = c.CGEventTapCreate(
-                c.kCGSessionEventTap,
-                c.kCGHeadInsertEventTap,
-                c.kCGEventTapOptionDefault,
-                event_mask,
-                eventCallback,
-                null,
-            );
-
-            if (tap == null) {
-                return error.FailedToCreateEventTap;
-            }
-
-            const run_loop_source = c.CFMachPortCreateRunLoopSource(
-                c.kCFAllocatorDefault,
-                tap,
-                0,
-            );
-
-            if (run_loop_source == null) {
-                releaseCF(tap);
-                return error.FailedToCreateRunLoopSource;
-            }
-            defer releaseCF(run_loop_source);
-
-            c.CFRunLoopAddSource(
-                c.CFRunLoopGetCurrent(),
-                run_loop_source,
-                c.kCFRunLoopCommonModes,
-            );
-
-            c.CGEventTapEnable(tap, true);
-            return tap;
-        }
-
-        pub fn disableInputBlocker(tap: EventTap) void {
-            if (tap) |t| {
-                c.CGEventTapEnable(t, false);
-            }
-        }
-
-        pub fn getDisplays(displays: []Display, display_count: *u32) !void {
-            const max_displays: u32 = @intCast(displays.len);
-            const result = c.CGGetOnlineDisplayList(max_displays, displays.ptr, display_count);
-            if (result != 0) return error.GetDisplayListFailed;
-        }
-
-        pub fn captureDisplay(display: Display) !void {
-            const result = c.CGDisplayCapture(display);
-            if (result != 0) return error.DisplayCaptureFailed;
-            _ = c.CGDisplaySetDisplayMode(display, null, null);
-        }
-
-        pub fn releaseDisplay(display: Display) void {
-            _ = c.CGDisplayShowCursor(display);
-            _ = c.CGDisplayRelease(display);
-        }
-
-        pub fn showCursor(display: Display) void {
-            _ = c.CGDisplayShowCursor(display);
-        }
-
-        pub fn openAccessibilitySettings() !void {
-            const result = try process.Child.run(.{
-                .allocator = heap.page_allocator,
-                .argv = &[_][]const u8{
-                    "open",
-                    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
-                },
-            });
-
-            if (result.term.Exited != 0) {
-                return error.FailedToOpenSettings;
-            }
-        }
-    },
-    .windows => struct {
-        const c = @cImport({
-            @cInclude("windows.h");
-        });
-
-        pub const EventTap = ?*anyopaque; // Windows equivalent would be a hook
-        pub const Display = c.HMONITOR;
-
-        pub fn createInputBlocker() !EventTap {
-            // TODO: Implement Windows input blocking using SetWindowsHookEx
-            return error.Unimplemented;
-        }
-
-        pub fn disableInputBlocker(tap: EventTap) void {
-            _ = tap;
-            // TODO: Implement Windows hook removal
-        }
-
-        pub fn getDisplays(displays: []Display, display_count: *u32) !void {
-            _ = displays;
-            _ = display_count;
-            // TODO: Implement Windows display enumeration
-            return error.Unimplemented;
-        }
-
-        pub fn captureDisplay(display: Display) !void {
-            _ = display;
-            // TODO: Implement Windows display capture
-            return error.Unimplemented;
-        }
-
-        pub fn releaseDisplay(display: Display) void {
-            _ = display;
-            // TODO: Implement Windows display release
-        }
-
-        pub fn showCursor(display: Display) void {
-            _ = display;
-            // TODO: Implement Windows cursor show
-        }
-
-        pub fn openAccessibilitySettings() !void {
-            // TODO: Open Windows accessibility settings
-            return error.Unimplemented;
-        }
-    },
-    else => @compileError("Unsupported operating system"),
+        })
+    else
+        struct {};
 };
 
-const Global = struct {
-    pub const supported_os = struct {
-        pub const macos = void{};
-    };
-
-    config: Config,
-    stdout: fs.File.Writer,
-    arena: std.heap.ArenaAllocator,
-
-    fn init() !Global {
-        return Global{
-            .config = undefined,
-            .stdout = io.getStdOut().writer(),
-            .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator),
-        };
-    }
-
-    fn deinit(self: *Global) void {
-        self.arena.deinit();
-    }
-};
-
-var g: Global = undefined;
+// Global state
+var cfg: Config = undefined;
+var stdout: fs.File.Writer = undefined;
+var arena: std.heap.ArenaAllocator = undefined;
+var input: Input = undefined;
+var display: Display = undefined;
 
 const HELP_TEXT =
     \\Usage: smoko <time>
@@ -226,13 +64,22 @@ const HELP_TEXT =
 ///
 /// Default configuration is stored in ~/.config/smoko/config.txt (edit with `smoko edit`).
 pub fn main() !void {
-    // 1. init Global
-    var global = try Global.init();
-    defer global.deinit();
+    // 1. init globals
+    stdout = io.getStdOut().writer();
+    arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    cfg = try Config.loadOrCreate();
+
+    input = try Input.init();
+    defer input.deinit();
+
+    display = try Display.init();
+    defer display.deinit();
 
     // 2. check OS support
-    if (!@hasField(Global.supported_os, @tagName(builtin.os.tag))) {
-        try global.stdout.print("Error: {s} is not supported\n", .{@tagName(builtin.os.tag)});
+    if (builtin.os.tag != .macos) {
+        try stdout.print("Error: {s} is not supported\n", .{@tagName(builtin.os.tag)});
         return error.UnsupportedOS;
     }
 
@@ -240,117 +87,7 @@ pub fn main() !void {
     const args = try parseArgs();
 
     // 4. run action based on args
-    try runAction(args, &global);
-}
-
-fn init(minutes: u32) !void {
-    if (minutes > 0) { // Start the countdown
-        var mins_remaining: u32 = minutes;
-
-        while (mins_remaining > 0) {
-            try g.stdout.print("\rSmoko in {d} minutes.", .{mins_remaining});
-            time.sleep(time.ns_per_min);
-            mins_remaining -= 1;
-        }
-    }
-
-    try g.stdout.print("\rTime for smoko.                 \n", .{});
-
-    // Initialize input blocker
-    g.input_blocker = try InputBlocker.init();
-
-    try InputBlocker.block(g.config.pre_blank_countdown_secs, "Input blocked. Blanking displays in", g.stdout);
-
-    // Initialize display manager
-    g.display_manager = try DisplayManager.init(g.arena.allocator(), 16);
-
-    if (g.display_manager) |*dm| {
-        try dm.captureAll(g.stdout);
-        try InputBlocker.block(g.config.post_blank_countdown_secs, "Displays blanked. Releasing input block in", g.stdout);
-        dm.showAllCursors();
-    }
-
-    try g.stdout.print("Input block released. Done.\n", .{});
-}
-
-/// Creates an event tap that blocks all input events
-fn createInputBlocker() !os_impl.EventTap {
-    const event_mask = os_impl.c.CGEventMaskBit(os_impl.c.kCGEventKeyDown) |
-        os_impl.c.CGEventMaskBit(os_impl.c.kCGEventKeyUp) |
-        os_impl.c.CGEventMaskBit(os_impl.c.kCGEventMouseMoved) |
-        os_impl.c.CGEventMaskBit(os_impl.c.kCGEventLeftMouseDown) |
-        os_impl.c.CGEventMaskBit(os_impl.c.kCGEventLeftMouseUp) |
-        os_impl.c.CGEventMaskBit(os_impl.c.kCGEventRightMouseDown) |
-        os_impl.c.CGEventMaskBit(os_impl.c.kCGEventRightMouseUp) |
-        os_impl.c.CGEventMaskBit(os_impl.c.kCGEventScrollWheel) |
-        os_impl.c.CGEventMaskBit(os_impl.c.kCGEventFlagsChanged); // Add this to catch modifier keys
-
-    const tap = os_impl.c.CGEventTapCreate(
-        os_impl.c.kCGSessionEventTap,
-        os_impl.c.kCGHeadInsertEventTap,
-        os_impl.c.kCGEventTapOptionDefault,
-        event_mask,
-        eventCallback,
-        null,
-    );
-
-    if (tap == null) {
-        try g.stdout.print("\nError: Failed to create event tap. Please grant accessibility permissions in:\n", .{});
-        try g.stdout.print("System Settings > Privacy & Security > Accessibility\n\n", .{});
-        try g.stdout.print("Opening System Settings...\n", .{});
-        try openAccessibilitySettings();
-        return error.FailedToCreateEventTap;
-    }
-
-    const run_loop_source = os_impl.c.CFMachPortCreateRunLoopSource(
-        os_impl.c.kCFAllocatorDefault,
-        tap,
-        0,
-    );
-
-    if (run_loop_source == null) {
-        os_impl.releaseCF(tap);
-        return error.FailedToCreateRunLoopSource;
-    }
-    defer os_impl.releaseCF(run_loop_source);
-
-    os_impl.c.CFRunLoopAddSource(
-        os_impl.c.CFRunLoopGetCurrent(),
-        run_loop_source,
-        os_impl.c.kCFRunLoopCommonModes,
-    );
-
-    os_impl.c.CGEventTapEnable(tap, true);
-    return tap;
-}
-
-/// Callback function for the event tap
-fn eventCallback(
-    proxy: os_impl.c.CGEventTapProxy,
-    event_type: os_impl.c.CGEventType,
-    event: os_impl.c.CGEventRef,
-    user_info: ?*anyopaque,
-) callconv(.C) os_impl.c.CGEventRef {
-    _ = proxy;
-    _ = event_type;
-    _ = event;
-    _ = user_info;
-    // Return null to block the event
-    return null;
-}
-
-fn openAccessibilitySettings() !void {
-    const result = try process.Child.run(.{
-        .allocator = std.heap.page_allocator,
-        .argv = &[_][]const u8{
-            "open",
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
-        },
-    });
-
-    if (result.term.Exited != 0) {
-        return error.FailedToOpenSettings;
-    }
+    try runAction(args);
 }
 
 const Action = union(enum) {
@@ -373,50 +110,214 @@ fn parseArgs() !Action {
     return Action{ .countdown = try fmt.parseInt(u32, arg, 10) };
 }
 
-fn runAction(action: Action, global: *Global) !void {
+fn runAction(action: Action) !void {
     switch (action) {
-        .help => try showHelp(global),
-        .immediate => try startBreak(0, global),
-        .config => try showConfig(global),
-        .edit => try editConfig(global),
-        .countdown => |mins| try startBreak(mins, global),
+        .help => try showHelp(),
+        .immediate => try startSmoko(),
+        .config => try showConfig(),
+        .edit => try editConfig(),
+        .countdown => |mins| try startCountdown(mins),
     }
 }
 
-fn showHelp(global: *Global) !void {
-    try global.stdout.writeAll(HELP_TEXT);
+fn showHelp() !void {
+    try stdout.writeAll(HELP_TEXT);
 }
 
-fn showConfig(global: *Global) !void {
-    try global.config.show(global.stdout);
+fn startSmoko() !void {
+    try stdout.print("\rTime for smoko.                 \n", .{});
+
+    try input.block();
+    try stdout.print("Input blocked. Blanking displays in {d} seconds...\n", .{cfg.buffer_before});
+    const buffer_ns: u64 = @as(u64, cfg.buffer_before) * time.ns_per_s;
+    time.sleep(buffer_ns);
+
+    try display.blank();
+    try stdout.print("Displays blanked. Smoko ends in {d} minutes...\n", .{cfg.smoko_length});
+    const smoko_ns: u64 = @as(u64, cfg.smoko_length) * time.ns_per_min;
+    time.sleep(smoko_ns);
+
+    display.restore();
+    input.restore();
+    try stdout.print("Break complete.\n", .{});
 }
 
-fn editConfig(global: *Global) !void {
-    _ = global;
-    return error.Unimplemented;
+fn showConfig() !void {
+    const config_path = try config.getConfigPath();
+    defer heap.page_allocator.free(config_path);
+
+    try stdout.print("config_path: {s}\n\n", .{config_path});
+    try stdout.print("buffer_before: {d}\n", .{cfg.buffer_before});
+    try stdout.print("smoko_length: {d}\n", .{cfg.smoko_length});
+    try stdout.print("lock_length: {d}\n", .{cfg.lock_length});
 }
 
-fn startBreak(minutes: u32, global: *Global) !void {
-    if (minutes > 0) {
-        try global.stdout.print("\rStarting break in {d} minutes...\n", .{minutes});
-        var mins_remaining: u32 = minutes;
-        while (mins_remaining > 0) : (mins_remaining -= 1) {
-            try global.stdout.print("\rSmoko in {d} minutes.", .{mins_remaining});
-            time.sleep(time.ns_per_min);
+fn editConfig() !void {
+    try stdout.print("Editing config file...\n", .{});
+
+    const config_path = try config.getConfigPath();
+    defer heap.page_allocator.free(config_path);
+
+    // Try to get $EDITOR from environment, or use default
+    var editor_buf: []const u8 = undefined;
+    var should_free_editor = false;
+    editor_buf = process.getEnvVarOwned(heap.page_allocator, "EDITOR") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => "open",
+        else => return err,
+    };
+    if (!mem.eql(u8, editor_buf, "open")) {
+        should_free_editor = true;
+    }
+    defer if (should_free_editor) heap.page_allocator.free(editor_buf);
+
+    var cmd = process.Child.init(&[_][]const u8{ editor_buf, config_path }, heap.page_allocator);
+    try cmd.spawn();
+    _ = try cmd.wait();
+}
+
+fn startCountdown(minutes: u32) !void {
+    var mins_remaining: u32 = minutes;
+    while (mins_remaining > 0) : (mins_remaining -= 1) {
+        try stdout.print("\rSmoko in {d} minutes.", .{mins_remaining});
+        time.sleep(time.ns_per_min);
+    }
+
+    try startSmoko();
+}
+
+const Input = struct {
+    tap: if (builtin.os.tag == .macos) ?OS.c.CFMachPortRef else void,
+
+    fn init() !Input {
+        return Input{ .tap = null };
+    }
+
+    fn deinit(self: *Input) void {
+        if (builtin.os.tag == .macos) {
+            if (self.tap) |t| {
+                OS.c.CGEventTapEnable(t, false);
+            }
         }
     }
 
-    try global.stdout.print("\rTime for smoko.                 \n", .{});
+    fn block(self: *Input) !void {
+        if (builtin.os.tag == .macos) {
+            const event_mask = OS.c.CGEventMaskBit(OS.c.kCGEventKeyDown) |
+                OS.c.CGEventMaskBit(OS.c.kCGEventKeyUp) |
+                OS.c.CGEventMaskBit(OS.c.kCGEventMouseMoved) |
+                OS.c.CGEventMaskBit(OS.c.kCGEventLeftMouseDown) |
+                OS.c.CGEventMaskBit(OS.c.kCGEventLeftMouseUp) |
+                OS.c.CGEventMaskBit(OS.c.kCGEventRightMouseDown) |
+                OS.c.CGEventMaskBit(OS.c.kCGEventRightMouseUp) |
+                OS.c.CGEventMaskBit(OS.c.kCGEventScrollWheel) |
+                OS.c.CGEventMaskBit(OS.c.kCGEventFlagsChanged);
 
-    try global.input_blocker.?.block();
-    try global.stdout.print("Input blocked. Blanking displays in {d} seconds...\n", .{global.config.pre_blank_countdown_secs});
-    time.sleep(global.config.pre_blank_countdown_secs * time.ns_per_s);
+            const tap = OS.c.CGEventTapCreate(
+                OS.c.kCGSessionEventTap,
+                OS.c.kCGHeadInsertEventTap,
+                OS.c.kCGEventTapOptionDefault,
+                event_mask,
+                eventCallback,
+                null,
+            );
 
-    try global.display_manager.?.blank();
-    try global.stdout.print("Displays blanked. Break ends in {d} seconds...\n", .{global.config.post_blank_countdown_secs});
-    time.sleep(global.config.post_blank_countdown_secs * time.ns_per_s);
+            if (tap == null) return error.FailedToCreateEventTap;
 
-    global.display_manager.?.restore();
-    global.input_blocker.?.restore();
-    try global.stdout.print("Break complete.\n", .{});
+            const run_loop_source = OS.c.CFMachPortCreateRunLoopSource(
+                OS.c.kCFAllocatorDefault,
+                tap,
+                0,
+            );
+
+            if (run_loop_source == null) {
+                if (tap) |t| OS.c.CFRelease(t);
+                return error.FailedToCreateRunLoopSource;
+            }
+            defer if (run_loop_source) |s| OS.c.CFRelease(s);
+
+            OS.c.CFRunLoopAddSource(
+                OS.c.CFRunLoopGetCurrent(),
+                run_loop_source,
+                OS.c.kCFRunLoopCommonModes,
+            );
+
+            OS.c.CGEventTapEnable(tap, true);
+            self.tap = tap;
+        }
+    }
+
+    fn restore(self: *Input) void {
+        if (builtin.os.tag == .macos) {
+            if (self.tap) |t| {
+                OS.c.CGEventTapEnable(t, false);
+                OS.c.CFRelease(t);
+                self.tap = null;
+            }
+        }
+    }
+};
+
+const Display = struct {
+    displays: if (builtin.os.tag == .macos) [16]OS.c.CGDirectDisplayID else void,
+    display_count: u32,
+
+    fn init() !Display {
+        return Display{
+            .displays = undefined,
+            .display_count = 0,
+        };
+    }
+
+    fn deinit(self: *Display) void {
+        if (builtin.os.tag == .macos) {
+            var i: u32 = 0;
+            while (i < self.display_count) : (i += 1) {
+                _ = OS.c.CGDisplayShowCursor(self.displays[i]);
+                _ = OS.c.CGDisplayRelease(self.displays[i]);
+            }
+        }
+    }
+
+    fn blank(self: *Display) !void {
+        if (builtin.os.tag == .macos) {
+            const result = OS.c.CGGetOnlineDisplayList(
+                16,
+                &self.displays,
+                &self.display_count,
+            );
+            if (result != 0) return error.GetDisplayListFailed;
+
+            var i: u32 = 0;
+            while (i < self.display_count) : (i += 1) {
+                const disp = self.displays[i];
+                const result2 = OS.c.CGDisplayCapture(disp);
+                if (result2 != 0) continue;
+                _ = OS.c.CGDisplaySetDisplayMode(disp, null, null);
+            }
+        }
+    }
+
+    fn restore(self: *Display) void {
+        if (builtin.os.tag == .macos) {
+            var i: u32 = 0;
+            while (i < self.display_count) : (i += 1) {
+                _ = OS.c.CGDisplayShowCursor(self.displays[i]);
+                _ = OS.c.CGDisplayRelease(self.displays[i]);
+            }
+            self.display_count = 0;
+        }
+    }
+};
+
+fn eventCallback(
+    proxy: OS.c.CGEventTapProxy,
+    event_type: OS.c.CGEventType,
+    event: OS.c.CGEventRef,
+    user_info: ?*anyopaque,
+) callconv(.C) OS.c.CGEventRef {
+    _ = proxy;
+    _ = event_type;
+    _ = event;
+    _ = user_info;
+    return null;
 }
