@@ -11,6 +11,11 @@ const c = @cImport({
     @cInclude("unistd.h");
 });
 
+// Global state for cleanup
+var g_tap: ?c.CFMachPortRef = null;
+var g_displays: [16]u32 = undefined;
+var g_display_count: u32 = 0;
+
 const HELP_TEXT =
     \\Usage: smoko <time>
     \\
@@ -30,11 +35,8 @@ const HELP_TEXT =
     \\
 ;
 
-// Testing direct .h bindings. Feels smooth
 pub fn main() !void {
-    // _ = c.printf("c stdio\n");
-
-    // Gettings args
+    // Getting args
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_state.deinit();
     const args = try std.process.argsAlloc(arena_state.allocator());
@@ -71,55 +73,80 @@ fn sleepDisplays(minutes: u32) anyerror!void {
 
     // Create an event tap to capture all input first
     const tap = try createInputBlocker();
-    defer c.CFRelease(tap);
+    defer {
+        g_tap = null;
+        c.CFRelease(tap);
+    }
+    g_tap = tap;
 
-    // Block input for 10 seconds
-    try stdout.print("Input blocked. Sleeping display in 10 seconds...\n", .{});
-    var time_remaining: f64 = 10.0;
+    // Block input for 3 seconds
+    try stdout.print("Input blocked. Blanking displays in 3 seconds...\n", .{});
+    var time_remaining: f64 = 3.0;
     while (time_remaining > 0) {
         const run_result = c.CFRunLoopRunInMode(c.kCFRunLoopDefaultMode, 0.1, 0);
         _ = run_result;
         time_remaining -= 0.1;
     }
 
-    // Put displays to sleep
-    const result = try displaySleepNow();
-    if (result.term.Exited != 0) {
-        try stdout.print("\nFailed to put display to sleep\n", .{});
-        return error.SetDisplaysToSleepFailed;
+    // Get all connected displays
+    try stdout.print("Blanking displays...\n", .{});
+    const max_displays: u32 = 16;
+    const get_displays_result = c.CGGetOnlineDisplayList(max_displays, &g_displays, &g_display_count);
+    if (get_displays_result != 0) {
+        try stdout.print("\nFailed to get display list\n", .{});
+        return error.GetDisplayListFailed;
     }
 
-    // Block input for another 10 seconds
-    try stdout.print("Display sleeping. Releasing input block in 10 seconds...\n", .{});
-    time_remaining = 10.0;
+    try stdout.print("Found {d} displays:\n", .{g_display_count});
+
+    // Capture and blank each display
+    var i: u32 = 0;
+    while (i < g_display_count) : (i += 1) {
+        const display = g_displays[i];
+        const bounds = c.CGDisplayBounds(display);
+        const is_main = c.CGDisplayIsMain(display);
+        const is_active = c.CGDisplayIsActive(display);
+        const is_online = c.CGDisplayIsOnline(display);
+        try stdout.print("Display {d}: ID={d}, Main={}, Active={}, Online={}, Bounds=[{d},{d} {d}x{d}]\n", .{ i, display, is_main, is_active, is_online, bounds.origin.x, bounds.origin.y, bounds.size.width, bounds.size.height });
+
+        try stdout.print("Capturing display {d}...\n", .{i});
+        const capture_result = c.CGDisplayCapture(display);
+        if (capture_result != 0) {
+            try stdout.print("\nFailed to capture display {d}\n", .{i});
+            continue;
+        }
+
+        _ = c.CGDisplayHideCursor(display);
+        _ = c.CGDisplaySetDisplayMode(display, null, null);
+    }
+    defer {
+        // Release all displays
+        var j: u32 = 0;
+        while (j < g_display_count) : (j += 1) {
+            _ = c.CGDisplayShowCursor(g_displays[j]);
+            _ = c.CGDisplayRelease(g_displays[j]);
+        }
+        g_display_count = 0;
+    }
+
+    // Block input for another 3 seconds
+    try stdout.print("Displays blanked. Releasing input block in 3 seconds...\n", .{});
+    time_remaining = 3.0;
     while (time_remaining > 0) {
         const run_result = c.CFRunLoopRunInMode(c.kCFRunLoopDefaultMode, 0.1, 0);
         _ = run_result;
         time_remaining -= 0.1;
+    }
+
+    // Show cursors before exiting
+    var k: u32 = 0;
+    while (k < g_display_count) : (k += 1) {
+        _ = c.CGDisplayShowCursor(g_displays[k]);
     }
 
     // Disable input blocking
     c.CGEventTapEnable(tap, false);
     try stdout.print("Input block released. Done.\n", .{});
-}
-
-/// Brings the specified process to the foreground
-pub fn activateProcess(pid: c.pid_t) !void {
-    // Get the ProcessSerialNumber for the given pid
-    var psn: c.ProcessSerialNumber = undefined;
-    if (c.GetProcessForPID(pid, &psn) != 0) {
-        return error.ProcessNotFound;
-    }
-
-    // Set the process as the frontmost one
-    if (c.SetFrontProcess(&psn) != 0) {
-        const stdout = std.io.getStdOut().writer();
-        try stdout.print("\nError: Failed to set process as frontmost. Please grant accessibility permissions in:\n", .{});
-        try stdout.print("System Settings > Privacy & Security > Accessibility\n\n", .{});
-        try stdout.print("Opening System Settings...\n", .{});
-        try openAccessibilitySettings();
-        return error.FailedToSetFrontProcess;
-    }
 }
 
 /// Creates an event tap that blocks all input events
@@ -131,7 +158,8 @@ fn createInputBlocker() !c.CFMachPortRef {
         c.CGEventMaskBit(c.kCGEventLeftMouseUp) |
         c.CGEventMaskBit(c.kCGEventRightMouseDown) |
         c.CGEventMaskBit(c.kCGEventRightMouseUp) |
-        c.CGEventMaskBit(c.kCGEventScrollWheel);
+        c.CGEventMaskBit(c.kCGEventScrollWheel) |
+        c.CGEventMaskBit(c.kCGEventFlagsChanged); // Add this to catch modifier keys
 
     const tap = c.CGEventTapCreate(
         c.kCGSessionEventTap,
