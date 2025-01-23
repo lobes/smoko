@@ -1,8 +1,6 @@
 default:
     zig build run
 
-release:
-    zig build -Doptimize=ReleaseSmall
-    
 install:
+    zig build -Doptimize=ReleaseSmall
     mv zig-out/bin/smoko ~/.local/bin
