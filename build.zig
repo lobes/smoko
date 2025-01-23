@@ -14,6 +14,12 @@ pub fn build(b: *std.Build) void {
     exe.linkSystemLibrary("z");
     exe.linkLibC();
 
+    // Add ApplicationServices framework for macOS
+    if (target.result.os.tag == .macos) {
+        exe.linkFramework("ApplicationServices");
+        exe.linkFramework("CoreGraphics");
+    }
+
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
