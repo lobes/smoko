@@ -1,7 +1,8 @@
 const std = @import("std");
 const process = std.process;
 const heap = std.heap;
-const fs = std.fs;
+const ArenaAllocator = std.heap.ArenaAllocator;
+const Writer = std.fs.File.Writer;
 const io = std.io;
 const mem = std.mem;
 const fmt = std.fmt;
@@ -9,6 +10,8 @@ const time = std.time;
 const builtin = @import("builtin");
 const config = @import("config.zig");
 const Config = config.Config;
+const d = @import("display.zig");
+const DisplayManager = d.DisplayManager;
 
 const OS = struct {
     const c = if (builtin.os.tag == .macos)
@@ -22,10 +25,10 @@ const OS = struct {
 
 // Global state
 var cfg: Config = undefined;
-var stdout: fs.File.Writer = undefined;
-var arena: std.heap.ArenaAllocator = undefined;
+var stdout: Writer = undefined;
+var arena: ArenaAllocator = undefined;
 var input: Input = undefined;
-var display: Display = undefined;
+var display: DisplayManager = undefined;
 
 const HELP_TEXT =
     \\Usage: smoko <time>
@@ -66,7 +69,7 @@ const HELP_TEXT =
 pub fn main() !void {
     // 1. init globals
     stdout = io.getStdOut().writer();
-    arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    arena = ArenaAllocator.init(heap.page_allocator);
     defer arena.deinit();
 
     cfg = try Config.loadOrCreate();
@@ -74,7 +77,7 @@ pub fn main() !void {
     input = try Input.init();
     defer input.deinit();
 
-    display = try Display.init();
+    display = try DisplayManager.init(arena.allocator(), 16);
     defer display.deinit();
 
     // 2. check OS support
@@ -127,18 +130,13 @@ fn showHelp() !void {
 fn startSmoko() !void {
     try stdout.print("\rTime for smoko.                 \n", .{});
 
-    try input.block();
+    // try input.block();
     try stdout.print("Input blocked. Blanking displays in {d} seconds...\n", .{cfg.buffer_before});
     const buffer_ns: u64 = @as(u64, cfg.buffer_before) * time.ns_per_s;
     time.sleep(buffer_ns);
 
-    try display.blank();
-    try stdout.print("Displays blanked. Smoko ends in {d} minutes...\n", .{cfg.smoko_length});
-    const smoko_ns: u64 = @as(u64, cfg.smoko_length) * time.ns_per_min;
-    time.sleep(smoko_ns);
-
-    display.restore();
-    input.restore();
+    // This will block until the window is closed
+    try display.captureAll(&stdout);
     try stdout.print("Break complete.\n", .{});
 }
 
@@ -253,58 +251,6 @@ const Input = struct {
                 OS.c.CFRelease(t);
                 self.tap = null;
             }
-        }
-    }
-};
-
-const Display = struct {
-    displays: if (builtin.os.tag == .macos) [16]OS.c.CGDirectDisplayID else void,
-    display_count: u32,
-
-    fn init() !Display {
-        return Display{
-            .displays = undefined,
-            .display_count = 0,
-        };
-    }
-
-    fn deinit(self: *Display) void {
-        if (builtin.os.tag == .macos) {
-            var i: u32 = 0;
-            while (i < self.display_count) : (i += 1) {
-                _ = OS.c.CGDisplayShowCursor(self.displays[i]);
-                _ = OS.c.CGDisplayRelease(self.displays[i]);
-            }
-        }
-    }
-
-    fn blank(self: *Display) !void {
-        if (builtin.os.tag == .macos) {
-            const result = OS.c.CGGetOnlineDisplayList(
-                16,
-                &self.displays,
-                &self.display_count,
-            );
-            if (result != 0) return error.GetDisplayListFailed;
-
-            var i: u32 = 0;
-            while (i < self.display_count) : (i += 1) {
-                const disp = self.displays[i];
-                const result2 = OS.c.CGDisplayCapture(disp);
-                if (result2 != 0) continue;
-                _ = OS.c.CGDisplaySetDisplayMode(disp, null, null);
-            }
-        }
-    }
-
-    fn restore(self: *Display) void {
-        if (builtin.os.tag == .macos) {
-            var i: u32 = 0;
-            while (i < self.display_count) : (i += 1) {
-                _ = OS.c.CGDisplayShowCursor(self.displays[i]);
-                _ = OS.c.CGDisplayRelease(self.displays[i]);
-            }
-            self.display_count = 0;
         }
     }
 };

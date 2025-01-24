@@ -1,49 +1,73 @@
 const std = @import("std");
-const os = @import("os/os.zig").os;
+const Allocator = std.mem.Allocator;
+const rl = @import("raylib.zig");
 
 pub const DisplayManager = struct {
-    displays: []os.Display,
-    display_count: u32,
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
+    windows_initialized: bool = false,
+    font: rl.Font = undefined,
 
-    pub fn init(allocator: std.mem.Allocator, max_displays: u32) !DisplayManager {
-        var displays = try allocator.alloc(os.Display, max_displays);
-        var display_count: u32 = 0;
-
-        try os.getDisplays(displays, &display_count);
-
+    pub fn init(allocator: Allocator, max_displays: u32) !DisplayManager {
+        _ = max_displays;
         return DisplayManager{
-            .displays = displays[0..display_count],
-            .display_count = display_count,
             .allocator = allocator,
+            .windows_initialized = false,
         };
     }
 
     pub fn deinit(self: *DisplayManager) void {
-        self.allocator.free(self.displays);
-    }
-
-    pub fn captureAll(self: *DisplayManager, writer: anytype) !void {
-        try writer.print("Found {d} displays:\n", .{self.display_count});
-
-        for (self.displays, 0..) |display, i| {
-            try writer.print("Capturing display {d}...\n", .{i});
-            os.captureDisplay(display) catch |err| {
-                try writer.print("\nFailed to capture display {d}: {any}\n", .{ i, err });
-                continue;
-            };
+        if (self.windows_initialized) {
+            rl.closeWindow();
         }
     }
 
+    pub fn captureAll(self: *DisplayManager, writer: anytype) !void {
+        try writer.print("Initializing display...\n", .{});
+
+        // Initialize raylib window
+        if (!self.windows_initialized) {
+            rl.initWindow(800, 600, "Smoko");
+            rl.setWindowState(rl.FLAG_FULLSCREEN_MODE);
+            rl.setTargetFPS(60);
+            self.windows_initialized = true;
+            self.font = rl.loadFont("/Users/lobes/Library/Fonts/ComicCodeLigatures-Regular.otf");
+        }
+
+        // Draw black rectangle until window is closed
+        while (!rl.windowShouldClose()) {
+            const screen_width = rl.getScreenWidth();
+            const screen_height = rl.getScreenHeight();
+            rl.beginDrawing();
+            rl.clearBackground(rl.BLACK);
+            rl.drawRectangle(0, 0, screen_width, screen_height, rl.BLACK);
+
+            // Draw text
+            const text = "ON SMOKO";
+            const font_size: f32 = 120;
+            const spacing: f32 = 4;
+            const text_size = rl.measureTextEx(self.font, text, font_size, spacing);
+            const text_pos = rl.Vector2{
+                .x = @as(f32, @floatFromInt(screen_width)) / 2 - text_size.x / 2,
+                .y = @as(f32, @floatFromInt(screen_height)) / 2 - text_size.y / 2,
+            };
+            rl.drawTextEx(self.font, text, text_pos, font_size, spacing, rl.WHITE);
+
+            rl.endDrawing();
+        }
+
+        // Clean up when window is closed
+        self.releaseAll();
+    }
+
     pub fn releaseAll(self: *DisplayManager) void {
-        for (self.displays) |display| {
-            os.releaseDisplay(display);
+        if (self.windows_initialized) {
+            rl.closeWindow();
+            self.windows_initialized = false;
         }
     }
 
     pub fn showAllCursors(self: *DisplayManager) void {
-        for (self.displays) |display| {
-            os.showCursor(display);
-        }
+        _ = self;
+        // No need to do anything since raylib handles cursor visibility
     }
 };
