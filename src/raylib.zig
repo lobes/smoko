@@ -101,3 +101,10 @@ pub const FLAG_FULLSCREEN_MODE = c.FLAG_FULLSCREEN_MODE;
 pub fn initWindowOnMonitor(width: i32, height: i32, title: [*c]const u8, monitor: i32) void {
     c.InitWindowOnMonitor(width, height, title, monitor);
 }
+
+pub fn setConfigFlags(flags: u32) void {
+    c.SetConfigFlags(flags);
+}
+
+pub const FLAG_WINDOW_UNDECORATED = c.FLAG_WINDOW_UNDECORATED;
+pub const FLAG_WINDOW_TOPMOST = c.FLAG_WINDOW_TOPMOST;

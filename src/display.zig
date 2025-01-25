@@ -1,192 +1,107 @@
 const std = @import("std");
-const Allocator = std.mem.Allocator;
-const rl = @import("raylib.zig");
+const renderer = @import("renderer");
 
-const TextAnimation = struct {
-    position: rl.Vector2,
-    velocity: rl.Vector2,
-    text: [*c]const u8,
-    font: rl.Font,
-    font_size: f32,
-    spacing: f32,
-    bounds: rl.Vector2,
+pub const Display = struct {
+    renderer: renderer.RendererInterface,
+    options: renderer.Options,
 
-    pub fn init(text: [*c]const u8, font: rl.Font) TextAnimation {
-        const font_size: f32 = 120;
-        const spacing: f32 = 4;
-        const bounds = rl.measureTextEx(font, text, font_size, spacing);
+    pub fn init(options: renderer.Options) !Display {
+        var self = Display{
+            .renderer = undefined,
+            .options = options,
+        };
 
-        // Start in the middle of the screen
-        const screen_width = @as(f32, @floatFromInt(rl.getScreenWidth()));
-        const screen_height = @as(f32, @floatFromInt(rl.getScreenHeight()));
-        const start_x = (screen_width - bounds.x) / 2;
-        const start_y = (screen_height - bounds.y) / 2;
+        const health = self.renderer.init(options);
+        if (health == .unhealthy) {
+            return error.RendererInitFailed;
+        }
 
-        return TextAnimation{
-            .position = .{ .x = start_x, .y = start_y },
-            .velocity = .{ .x = 5, .y = 3 },
+        return self;
+    }
+
+    pub fn deinit(self: *Display) void {
+        self.renderer.deinit();
+    }
+
+    pub fn drawRect(self: *Display, x: f32, y: f32, width: f32, height: f32, color: renderer.Color) !void {
+        const cmd = renderer.RenderCommand{
+            .op = .rect,
+            .x = x,
+            .y = y,
+            .width = width,
+            .height = height,
+            .color = color,
+        };
+
+        const health = self.renderer.submit(cmd);
+        if (health == .unhealthy) {
+            return error.RenderCommandFailed;
+        }
+    }
+
+    pub fn drawText(self: *Display, x: f32, y: f32, text: []const u8, color: renderer.Color) !void {
+        const cmd = renderer.RenderCommand{
+            .op = .text,
+            .x = x,
+            .y = y,
+            .width = 0, // Text width will be determined by the renderer
+            .height = 0,
+            .color = color,
             .text = text,
-            .font = font,
-            .font_size = font_size,
-            .spacing = spacing,
-            .bounds = bounds,
-        };
-    }
-
-    pub fn update(self: *TextAnimation) void {
-        self.updatePosition();
-        self.handleBoundaryCollisions();
-    }
-
-    fn updatePosition(self: *TextAnimation) void {
-        self.position.x += self.velocity.x;
-        self.position.y += self.velocity.y;
-    }
-
-    fn handleBoundaryCollisions(self: *TextAnimation) void {
-        const screen = Screen{
-            .width = @as(f32, @floatFromInt(rl.getScreenWidth())),
-            .height = @as(f32, @floatFromInt(rl.getScreenHeight())),
         };
 
-        // Handle horizontal collisions
-        const right_edge = self.position.x + self.bounds.x;
-        if (self.position.x < 0 or right_edge > screen.width) {
-            self.velocity.x = -self.velocity.x;
-            if (self.position.x < 0) self.position.x = 0;
-            if (right_edge > screen.width) self.position.x = screen.width - self.bounds.x;
-        }
-
-        // Handle vertical collisions
-        const bottom_edge = self.position.y + self.bounds.y;
-        if (self.position.y < 0 or bottom_edge > screen.height) {
-            self.velocity.y = -self.velocity.y;
-            if (self.position.y < 0) self.position.y = 0;
-            if (bottom_edge > screen.height) self.position.y = screen.height - self.bounds.y;
+        const health = self.renderer.submit(cmd);
+        if (health == .unhealthy) {
+            return error.RenderCommandFailed;
         }
     }
 
-    pub fn draw(self: *const TextAnimation) void {
-        rl.drawTextEx(self.font, self.text, self.position, self.font_size, self.spacing, rl.WHITE);
+    pub fn clear(self: *Display, color: renderer.Color) !void {
+        const cmd = renderer.RenderCommand{
+            .op = .clear,
+            .x = 0,
+            .y = 0,
+            .width = 0,
+            .height = 0,
+            .color = color,
+        };
+
+        const health = self.renderer.submit(cmd);
+        if (health == .unhealthy) {
+            return error.RenderCommandFailed;
+        }
+    }
+
+    pub fn present(self: *Display) !void {
+        const health = self.renderer.present();
+        if (health == .unhealthy) {
+            return error.PresentFailed;
+        }
     }
 };
 
-const Screen = struct {
-    width: f32,
-    height: f32,
-};
+// Example usage:
+test "basic rendering" {
+    var display = try Display.init(.{
+        // Add required options here
+    });
+    defer display.deinit();
 
-pub const DisplayManager = struct {
-    allocator: Allocator,
-    windows_initialized: bool = false,
-    font: rl.Font = undefined,
-    animation: ?TextAnimation = null,
-    num_monitors: i32 = 0,
+    // Clear screen to black
+    try display.clear(.{ .r = 0, .g = 0, .b = 0, .a = 255 });
 
-    pub fn init(allocator: Allocator, max_displays: u32) !DisplayManager {
-        _ = max_displays;
-        return DisplayManager{
-            .allocator = allocator,
-            .windows_initialized = false,
-            .num_monitors = rl.getMonitorCount(),
-        };
-    }
+    // Draw a red rectangle
+    try display.drawRect(
+        10, 10, 100, 50,
+        .{ .r = 255, .g = 0, .b = 0, .a = 255 }
+    );
 
-    pub fn deinit(self: *DisplayManager) void {
-        if (self.windows_initialized) {
-            rl.closeWindow();
-        }
-    }
+    // Draw some text
+    try display.drawText(
+        20, 20,
+        "Hello Smoko!",
+        .{ .r = 255, .g = 255, .b = 255, .a = 255 }
+    );
 
-    pub fn captureAll(self: *DisplayManager, writer: anytype) !void {
-        try writer.print("Initializing displays...\n", .{});
-
-        // Initialize raylib window
-        if (!self.windows_initialized) {
-            // Get the total width and height of all monitors combined
-            var total_width: i32 = 0;
-            var max_height: i32 = 0;
-            var min_x: i32 = 0;
-            var min_y: i32 = 0;
-
-            // First pass: calculate bounds
-            for (0..@as(usize, @intCast(self.num_monitors))) |i| {
-                const monitor: i32 = @intCast(i);
-                const pos = rl.getMonitorPosition(monitor);
-                const width = rl.getMonitorWidth(monitor);
-                const height = rl.getMonitorHeight(monitor);
-
-                min_x = @min(min_x, @as(i32, @intFromFloat(pos.x)));
-                min_y = @min(min_y, @as(i32, @intFromFloat(pos.y)));
-                total_width = @max(total_width, @as(i32, @intFromFloat(pos.x)) + width);
-                max_height = @max(max_height, @as(i32, @intFromFloat(pos.y)) + height);
-            }
-
-            // Adjust for negative positions
-            total_width -= min_x;
-            max_height -= min_y;
-
-            // Initialize window at the leftmost monitor position
-            rl.setWindowPosition(min_x, min_y);
-            rl.initWindow(total_width, max_height, "Smoko");
-            rl.setWindowState(rl.FLAG_FULLSCREEN_MODE);
-            rl.setTargetFPS(60);
-
-            self.font = rl.loadFont("/Users/lobes/Library/Fonts/ComicCodeLigatures-Regular.otf");
-            self.animation = TextAnimation.init("ON SMOKO", self.font);
-            self.windows_initialized = true;
-        }
-
-        // Main render loop
-        while (!rl.windowShouldClose()) {
-            self.drawFrame();
-        }
-
-        // Clean up when window is closed
-        self.releaseAll();
-    }
-
-    fn drawFrame(self: *DisplayManager) void {
-        rl.beginDrawing();
-        defer rl.endDrawing();
-
-        // Clear screen
-        rl.clearBackground(rl.BLACK);
-
-        // Draw black rectangles on each monitor
-        for (0..@as(usize, @intCast(self.num_monitors))) |i| {
-            const monitor: i32 = @intCast(i);
-            const pos = rl.getMonitorPosition(monitor);
-            const width = rl.getMonitorWidth(monitor);
-            const height = rl.getMonitorHeight(monitor);
-
-            rl.drawRectangle(
-                @intFromFloat(pos.x),
-                @intFromFloat(pos.y),
-                width,
-                height,
-                rl.BLACK,
-            );
-
-            // Draw animation on primary monitor only
-            if (monitor == 0 and self.animation != null) {
-                if (self.animation) |*anim| {
-                    anim.update();
-                    anim.draw();
-                }
-            }
-        }
-    }
-
-    pub fn releaseAll(self: *DisplayManager) void {
-        if (self.windows_initialized) {
-            rl.closeWindow();
-            self.windows_initialized = false;
-        }
-    }
-
-    pub fn showAllCursors(self: *DisplayManager) void {
-        _ = self;
-        // No need to do anything since raylib handles cursor visibility
-    }
-};
+    try display.present();
+}
