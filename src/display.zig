@@ -81,12 +81,14 @@ pub const DisplayManager = struct {
     windows_initialized: bool = false,
     font: rl.Font = undefined,
     animation: ?TextAnimation = null,
+    num_monitors: i32 = 0,
 
     pub fn init(allocator: Allocator, max_displays: u32) !DisplayManager {
         _ = max_displays;
         return DisplayManager{
             .allocator = allocator,
             .windows_initialized = false,
+            .num_monitors = rl.getMonitorCount(),
         };
     }
 
@@ -97,17 +99,42 @@ pub const DisplayManager = struct {
     }
 
     pub fn captureAll(self: *DisplayManager, writer: anytype) !void {
-        try writer.print("Initializing display...\n", .{});
+        try writer.print("Initializing displays...\n", .{});
 
         // Initialize raylib window
         if (!self.windows_initialized) {
-            // Initialize at a large resolution
-            rl.initWindow(1920, 1080, "Smoko");
+            // Get the total width and height of all monitors combined
+            var total_width: i32 = 0;
+            var max_height: i32 = 0;
+            var min_x: i32 = 0;
+            var min_y: i32 = 0;
+
+            // First pass: calculate bounds
+            for (0..@as(usize, @intCast(self.num_monitors))) |i| {
+                const monitor: i32 = @intCast(i);
+                const pos = rl.getMonitorPosition(monitor);
+                const width = rl.getMonitorWidth(monitor);
+                const height = rl.getMonitorHeight(monitor);
+
+                min_x = @min(min_x, @as(i32, @intFromFloat(pos.x)));
+                min_y = @min(min_y, @as(i32, @intFromFloat(pos.y)));
+                total_width = @max(total_width, @as(i32, @intFromFloat(pos.x)) + width);
+                max_height = @max(max_height, @as(i32, @intFromFloat(pos.y)) + height);
+            }
+
+            // Adjust for negative positions
+            total_width -= min_x;
+            max_height -= min_y;
+
+            // Initialize window at the leftmost monitor position
+            rl.setWindowPosition(min_x, min_y);
+            rl.initWindow(total_width, max_height, "Smoko");
             rl.setWindowState(rl.FLAG_FULLSCREEN_MODE);
             rl.setTargetFPS(60);
-            self.windows_initialized = true;
+
             self.font = rl.loadFont("/Users/lobes/Library/Fonts/ComicCodeLigatures-Regular.otf");
             self.animation = TextAnimation.init("ON SMOKO", self.font);
+            self.windows_initialized = true;
         }
 
         // Main render loop
@@ -120,20 +147,34 @@ pub const DisplayManager = struct {
     }
 
     fn drawFrame(self: *DisplayManager) void {
-        const screen_width = rl.getScreenWidth();
-        const screen_height = rl.getScreenHeight();
-
         rl.beginDrawing();
         defer rl.endDrawing();
 
         // Clear screen
         rl.clearBackground(rl.BLACK);
-        rl.drawRectangle(0, 0, screen_width, screen_height, rl.BLACK);
 
-        // Update and draw animation
-        if (self.animation) |*anim| {
-            anim.update();
-            anim.draw();
+        // Draw black rectangles on each monitor
+        for (0..@as(usize, @intCast(self.num_monitors))) |i| {
+            const monitor: i32 = @intCast(i);
+            const pos = rl.getMonitorPosition(monitor);
+            const width = rl.getMonitorWidth(monitor);
+            const height = rl.getMonitorHeight(monitor);
+
+            rl.drawRectangle(
+                @intFromFloat(pos.x),
+                @intFromFloat(pos.y),
+                width,
+                height,
+                rl.BLACK,
+            );
+
+            // Draw animation on primary monitor only
+            if (monitor == 0 and self.animation != null) {
+                if (self.animation) |*anim| {
+                    anim.update();
+                    anim.draw();
+                }
+            }
         }
     }
 

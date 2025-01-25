@@ -4,25 +4,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Create static library for raylib wrapper
-    const wrapper = b.addStaticLibrary(.{
-        .name = "raylib_wrapper",
-        .target = target,
-        .optimize = optimize,
-    });
-
-    var flags = std.ArrayList([]const u8).init(b.allocator);
-    defer flags.deinit();
-    wrapper.addCSourceFile(.{
-        .file = b.path("src/raylib_wrapper.c"),
-        .flags = flags.items,
-    });
-    wrapper.addIncludePath(b.path("src"));
-    wrapper.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
-    wrapper.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
-    wrapper.linkSystemLibrary("raylib");
-    wrapper.linkLibC();
-
     const exe = b.addExecutable(.{
         .name = "smoko",
         .root_source_file = b.path("src/main.zig"),
@@ -30,10 +11,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    exe.addIncludePath(b.path("src"));
     exe.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
     exe.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
-    exe.linkLibrary(wrapper);
     exe.linkSystemLibrary("raylib");
     exe.linkLibC();
 
@@ -54,4 +33,26 @@ pub fn build(b: *std.Build) void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+
+    // Add test step
+    const unit_tests = b.addTest(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Link the same dependencies for tests
+    unit_tests.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
+    unit_tests.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
+    unit_tests.linkSystemLibrary("raylib");
+    unit_tests.linkLibC();
+
+    if (target.result.os.tag == .macos) {
+        unit_tests.linkFramework("ApplicationServices");
+        unit_tests.linkFramework("CoreGraphics");
+    }
+
+    const run_unit_tests = b.addRunArtifact(unit_tests);
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&run_unit_tests.step);
 }
