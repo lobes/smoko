@@ -91,17 +91,10 @@ test "basic rendering" {
     try display.clear(.{ .r = 0, .g = 0, .b = 0, .a = 255 });
 
     // Draw a red rectangle
-    try display.drawRect(
-        10, 10, 100, 50,
-        .{ .r = 255, .g = 0, .b = 0, .a = 255 }
-    );
+    try display.drawRect(10, 10, 100, 50, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
 
     // Draw some text
-    try display.drawText(
-        20, 20,
-        "Hello Smoko!",
-        .{ .r = 255, .g = 255, .b = 255, .a = 255 }
-    );
+    try display.drawText(20, 20, "Hello Smoko!", .{ .r = 255, .g = 255, .b = 255, .a = 255 });
 
     try display.present();
 }
