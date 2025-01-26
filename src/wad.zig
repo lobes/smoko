@@ -59,7 +59,7 @@ pub const WadLump = struct {
     }
 
     pub fn getName(self: WadLump) []const u8 {
-        // Find the first null terminator or return full name if none found
+        // Find the first null terminator or end of name
         var end: usize = 0;
         while (end < 8 and self.name[end] != 0) : (end += 1) {}
         return self.name[0..end];

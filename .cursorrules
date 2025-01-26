@@ -1,1 +1,5 @@
+**REMEMBER if you get a linting error for anything in std, you need to check the generated std docs at zig-docs/**
+**REMEMBER especially do this if you're editing build.zig**
+
+
 - compile before ending generation
