@@ -9,12 +9,15 @@ var renderer: ?*c.SDL_Renderer = null;
 var stream: ?*c.SDL_AudioStream = null;
 var current_sine_sample: i32 = 0;
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+fn sdlNeg(ret: c_int) !void {
+    if (ret >= 0) return;
+    return error.SDLError;
+}
 
-    // Initialize SDL
-    if (!c.SDL_Init(c.SDL_INIT_VIDEO | c.SDL_INIT_AUDIO)) {
+pub fn main() !void {
+    // Initialize SDL with proper error checking
+    const init_flags: c.SDL_InitFlags = c.SDL_INIT_VIDEO | c.SDL_INIT_AUDIO;
+    if (!c.SDL_Init(init_flags)) {
         c.SDL_Log("Couldn't initialize SDL: %s", c.SDL_GetError());
         return error.SDLInitializationFailed;
     }
@@ -23,7 +26,7 @@ pub fn main() !void {
     // Set app metadata
     _ = c.SDL_SetAppMetadata("Zig Audio Simple Playback", "1.0", "com.example.zig-audio-simple-playback");
 
-    // Create window and renderer
+    // Create window and renderer with proper error checking
     if (!c.SDL_CreateWindowAndRenderer("examples/audio/simple-playback", 640, 480, 0, &window, &renderer)) {
         c.SDL_Log("Couldn't create window/renderer: %s", c.SDL_GetError());
         return error.SDLWindowCreationFailed;
@@ -80,6 +83,16 @@ pub fn main() !void {
             // Feed the audio data
             if (!c.SDL_PutAudioStreamData(stream, &samples, @sizeOf(@TypeOf(samples)))) {
                 c.SDL_Log("Failed to feed audio data: %s", c.SDL_GetError());
+            }
+        }
+
+        // Clear the renderer
+        if (renderer) |r| {
+            if (!c.SDL_RenderClear(r)) {
+                c.SDL_Log("Failed to clear renderer: %s", c.SDL_GetError());
+            }
+            if (!c.SDL_RenderPresent(r)) {
+                c.SDL_Log("Failed to present renderer: %s", c.SDL_GetError());
             }
         }
 

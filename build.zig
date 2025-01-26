@@ -4,11 +4,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Add renderer module first
-    const renderer_module = b.createModule(.{
-        .root_source_file = .{ .cwd_relative = "src/renderer.zig" },
-    });
-
     const exe = b.addExecutable(.{
         .name = "smoko",
         .root_source_file = .{ .cwd_relative = "src/main.zig" },
@@ -16,12 +11,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    exe.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
-    exe.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
-    exe.linkSystemLibrary("raylib");
-
-    // Add module to executable
-    exe.root_module.addImport("renderer", renderer_module);
+    exe.addIncludePath(.{ .cwd_relative = "/usr/local/include/SDL3" });
+    exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+    exe.linkSystemLibrary("SDL3");
 
     b.installArtifact(exe);
 
@@ -35,6 +27,26 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    // Audio example executable
+    const audio_example = b.addExecutable(.{
+        .name = "audio-example",
+        .root_source_file = .{ .cwd_relative = "src/audio_example.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    audio_example.addIncludePath(.{ .cwd_relative = "/usr/local/include/SDL3" });
+    audio_example.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+    audio_example.linkSystemLibrary("SDL3");
+
+    b.installArtifact(audio_example);
+
+    const run_audio = b.addRunArtifact(audio_example);
+    run_audio.step.dependOn(b.getInstallStep());
+
+    const run_audio_step = b.step("run-audio", "Run the audio example");
+    run_audio_step.dependOn(&run_audio.step);
+
     // Add test step
     const unit_tests = b.addTest(.{
         .root_source_file = .{ .cwd_relative = "src/main.zig" },
@@ -42,14 +54,30 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    unit_tests.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
-    unit_tests.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
-    unit_tests.linkSystemLibrary("raylib");
-
-    // Add module to tests
-    unit_tests.root_module.addImport("renderer", renderer_module);
+    unit_tests.addIncludePath(.{ .cwd_relative = "/usr/local/include/SDL3" });
+    unit_tests.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+    unit_tests.linkSystemLibrary("SDL3");
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    const sdl_types = b.addExecutable(.{
+        .name = "sdl-types",
+        .root_source_file = .{ .cwd_relative = "src/sdl_types.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    sdl_types.addIncludePath(.{ .cwd_relative = "/usr/local/include/SDL3" });
+    sdl_types.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+    sdl_types.linkSystemLibrary("SDL3");
+
+    b.installArtifact(sdl_types);
+
+    const run_types = b.addRunArtifact(sdl_types);
+    run_types.step.dependOn(b.getInstallStep());
+
+    const run_types_step = b.step("run-types", "Run the SDL type inspection");
+    run_types_step.dependOn(&run_types.step);
 }
