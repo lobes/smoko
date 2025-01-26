@@ -8,6 +8,9 @@
 		},
 		{
 			"path": "../ghostty"
+		},
+		{
+			"path": "../doom"
 		}
 	],
 	"settings": {}

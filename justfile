@@ -28,3 +28,28 @@ fmt-check:
 # Clean build artifacts
 clean:
     rm -rf zig-cache zig-out
+
+# Watch for changes and rebuild (requires watchexec: brew install watchexec)
+watch:
+    watchexec -w src -e zig "zig build run"
+
+# Run with debug logging
+debug-log:
+    zig build run -Doptimize=Debug --verbose-cimport --verbose-link
+
+# Show build help
+help:
+    zig build -h
+
+# Create wads directory and show instructions
+setup-wads:
+    mkdir -p src/wads
+    @echo "Please copy DOOM.WAD to src/wads/doom.wad to run the game"
+
+# List contents of WAD file
+list-wads:
+    hexdump -C src/wads/doom.wad | head -n 20
+
+# Dump WAD lumps
+dump-wads:
+    strings src/wads/doom.wad | grep -i e1m1

@@ -4,9 +4,14 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Add renderer module first
+    const renderer_module = b.createModule(.{
+        .root_source_file = .{ .cwd_relative = "src/renderer.zig" },
+    });
+
     const exe = b.addExecutable(.{
         .name = "smoko",
-        .root_source_file = b.path("src/main.zig"),
+        .root_source_file = .{ .cwd_relative = "src/main.zig" },
         .target = target,
         .optimize = optimize,
     });
@@ -14,13 +19,9 @@ pub fn build(b: *std.Build) void {
     exe.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
     exe.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
     exe.linkSystemLibrary("raylib");
-    exe.linkLibC();
 
-    // Add ApplicationServices framework for macOS
-    if (target.result.os.tag == .macos) {
-        exe.linkFramework("ApplicationServices");
-        exe.linkFramework("CoreGraphics");
-    }
+    // Add module to executable
+    exe.root_module.addImport("renderer", renderer_module);
 
     b.installArtifact(exe);
 
@@ -36,21 +37,17 @@ pub fn build(b: *std.Build) void {
 
     // Add test step
     const unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
+        .root_source_file = .{ .cwd_relative = "src/main.zig" },
         .target = target,
         .optimize = optimize,
     });
 
-    // Link the same dependencies for tests
     unit_tests.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
     unit_tests.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
     unit_tests.linkSystemLibrary("raylib");
-    unit_tests.linkLibC();
 
-    if (target.result.os.tag == .macos) {
-        unit_tests.linkFramework("ApplicationServices");
-        unit_tests.linkFramework("CoreGraphics");
-    }
+    // Add module to tests
+    unit_tests.root_module.addImport("renderer", renderer_module);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
