@@ -47,6 +47,43 @@ pub fn build(b: *std.Build) void {
     const run_audio_step = b.step("run-audio", "Run the audio example");
     run_audio_step.dependOn(&run_audio.step);
 
+    // WAV generator executable
+    const wav_gen = b.addExecutable(.{
+        .name = "generate-wav",
+        .root_source_file = .{ .cwd_relative = "src/generate_wav.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    b.installArtifact(wav_gen);
+
+    const run_wav_gen = b.addRunArtifact(wav_gen);
+    run_wav_gen.step.dependOn(b.getInstallStep());
+
+    const run_wav_gen_step = b.step("run-wav", "Run the WAV generator");
+    run_wav_gen_step.dependOn(&run_wav_gen.step);
+
+    // WAV loader executable
+    const wav_load = b.addExecutable(.{
+        .name = "load-wav",
+        .root_source_file = .{ .cwd_relative = "src/load-wav.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    wav_load.addIncludePath(.{ .cwd_relative = "/usr/local/include/SDL3" });
+    wav_load.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+    wav_load.linkSystemLibrary("SDL3");
+
+    b.installArtifact(wav_load);
+
+    const run_wav_load = b.addRunArtifact(wav_load);
+    run_wav_load.step.dependOn(&run_wav_gen.step); // Depend on WAV generation
+    run_wav_load.step.dependOn(b.getInstallStep());
+
+    const run_wav_load_step = b.step("run-wav-load", "Run the WAV loader");
+    run_wav_load_step.dependOn(&run_wav_load.step);
+
     // Add test step
     const unit_tests = b.addTest(.{
         .root_source_file = .{ .cwd_relative = "src/main.zig" },
